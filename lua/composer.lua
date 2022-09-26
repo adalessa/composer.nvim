@@ -40,6 +40,10 @@ M.namespace = function ()
 		return (dir:gsub("^%l", string.upper))
 	end
 
+    if starts_with(dir, vim.fn.getcwd()) then
+        dir = string.sub(dir, string.len(vim.fn.getcwd()) + 2)
+    end
+
 	local globalNamespace
 	for key, value in pairs(autoloads) do
 		if starts_with(dir, value:sub(1, -2)) then
