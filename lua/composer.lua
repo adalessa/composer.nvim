@@ -1,63 +1,93 @@
-local M = {}
+local composer = {}
 
-local function starts_with(text, start)
-	return string.sub(text, 1, string.len(start)) == start
+local function resolve_psr4(directory, map)
+  for k, v in pairs(map) do
+    if string.sub(directory, 1, string.len(v)) == v then
+      return k .. string.sub(directory, string.len(v) + 1):gsub("/", "\\")
+    elseif string.sub(directory, 1, string.len(v)) == string.sub(v, 1, -2) then
+      return string.sub(k, 1, -2)
+    end
+  end
 end
 
-local function get_composer_file()
-    if vim.fn.findfile("composer.json") ~= "" then
-        return vim.fn.json_decode(vim.fn.readfile(vim.fn.getcwd() .. "/composer.json"))
-    end
+function composer.read_composer_file()
+  local filename = vim.fn.findfile("composer.json", ".;")
+  if filename == "" then
+    return
+  end
+  local content = vim.fn.readfile(filename)
 
-    if vim.fn.findfile("master/composer.json") ~= "" then
-        return vim.fn.json_decode(vim.fn.readfile(vim.fn.getcwd() .. "/master/composer.json"))
-    end
+  return vim.fn.json_decode(content)
+end
 
+function composer.resolve_php_namespace()
+  local composer_data = composer.read_composer_file()
+
+  if composer_data == nil or composer_data["autoload"] == nil then
     return nil
+  end
+
+  local buffer_directory = vim.fn.expand("%:h")
+  local autoload = composer_data["autoload"]
+
+  if autoload["psr-4"] ~= nil then
+    local namespace = resolve_psr4(buffer_directory, autoload["psr-4"])
+    if namespace ~= nil then
+      return namespace
+    end
+  end
+
+  if autoload["classmap"] ~= nil then
+    local classmap = autoload["classmap"]
+    for _, v in ipairs(classmap) do
+      local fullpath = buffer_directory .. "/" .. v
+      if vim.loop.fs_stat(fullpath) ~= nil then
+        local namespace = string.sub(fullpath, string.len(vim.loop.cwd()) + 2):gsub("/", "\\"):gsub(".php$", "")
+        return namespace
+      end
+    end
+  end
+
+  -- Check if the namespace is defined in the autoload-dev section
+  if composer_data["autoload-dev"] ~= nil and composer_data["autoload-dev"]["psr-4"] ~= nil then
+    local namespace = resolve_psr4(buffer_directory, composer_data["autoload-dev"]["psr-4"])
+    if namespace ~= nil then
+      return namespace
+    end
+  end
+
+  if composer_data["autoload-dev"] ~= nil and composer_data["autoload-dev"]["classmap"] ~= nil then
+    local classmap_dev = composer_data["autoload-dev"]["classmap"]
+    for _, v in ipairs(classmap_dev) do
+      local fullpath = buffer_directory .. "/" .. v
+      if vim.loop.fs_stat(fullpath) ~= nil then
+        local namespace = string.sub(fullpath, string.len(vim.loop.cwd()) + 2):gsub("/", "\\"):gsub(".php$", "")
+        return namespace
+      end
+    end
+  end
+
+  return nil
 end
 
-M.query = function (path)
-    local target = get_composer_file()
+function composer.query_composer_file(keys)
+  local composer_data = composer.read_composer_file()
 
-    if target == nil then
-        return nil
+  if composer_data == nil then
+    return nil
+  end
+
+  local result = composer_data
+
+  for _, key in ipairs(keys) do
+    result = result[key]
+
+    if result == nil then
+      return nil
     end
+  end
 
-    for _, part in ipairs(path) do
-        target = target[part]
-        if target == nil then
-            return nil
-        end
-    end
-
-    return target
+  return result
 end
 
-M.namespace = function ()
-	local dir = vim.fn.expand("%:h")
-	local autoloads = M.query({ "autoload", "psr-4" })
-	if autoloads == nil then
-		return (dir:gsub("^%l", string.upper))
-	end
-
-    if starts_with(dir, vim.fn.getcwd()) then
-        dir = string.sub(dir, string.len(vim.fn.getcwd()) + 2)
-    end
-
-	local globalNamespace
-	for key, value in pairs(autoloads) do
-		if starts_with(dir, value:sub(1, -2)) then
-			globalNamespace = key:sub(1, -2)
-			dir = dir:sub(#key + 1)
-			break
-		end
-	end
-	dir = dir:gsub("/", "\\")
-    if dir == "" then
-        return globalNamespace
-    end
-
-	return string.format("%s\\%s", globalNamespace, dir)
-end
-
-return M
+return composer
