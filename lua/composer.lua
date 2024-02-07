@@ -27,7 +27,7 @@ function composer.resolve_php_namespace()
     return nil
   end
 
-  local buffer_directory = vim.fn.expand("%:h")
+  local buffer_directory = vim.fn.expand("%:.:h")
   local autoload = composer_data["autoload"]
 
   if autoload["psr-4"] ~= nil then
